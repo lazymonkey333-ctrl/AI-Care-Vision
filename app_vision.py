@@ -14,48 +14,42 @@ st.set_page_config(
 )
 
 # --- THEME: WARM CARE (Ultra-Safe Version) ---
-# We ONLY color the backgrounds. We do NOT touch layout/positioning.
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* 1. Import Font */
         @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600&display=swap');
         
-        /* 2. Apply Font to everything */
         html, body, [class*="css"] {
             font-family: 'Nunito', sans-serif;
         }
         
-        /* 3. Main Background Color (Cream) */
         .stApp {
             background-color: #FDFCF8;
         }
         
-        /* 4. Sidebar Background Color (Beige) */
         [data-testid="stSidebar"] {
             background-color: #F6F3E6;
         }
         
-        /* 5. Chat Bubbles (Peach & White) */
-        /* Assistant */
+        /* Assistant Bubble */
         .stChatMessage[data-testid="stChatMessage"]:nth-child(odd) {
              background-color: #FFFFFF;
              border: 1px solid #EFEBE0;
              border-radius: 10px;
         }
-        /* User */
+        /* User Bubble */
         .stChatMessage[data-testid="stChatMessage"]:nth-child(even) {
              background-color: #FFF0E3;
              border: 1px solid #FFE0C2;
              border-radius: 10px;
         }
         
-        /* 6. Headers (Warm Brown) */
+        /* Headers */
         h1, h2, h3, p {
             color: #4A3B32;
         }
         
-        /* 7. Button (Orange) */
+        /* Button */
         .stButton > button {
             background-color: #FFB74D;
             color: white;
@@ -78,13 +72,14 @@ PERSONAS = {
     "👴 Elderly Friendly": "Speak slowly and clearly. Use metaphors. Focus on safety."
 }
 
+# --- Title (Minimalist) ---
 st.title("🧡 AI Care Assistant")
 
 # --- Backend Logic ---
 pdfs = _rv.get_backend_pdfs()
 with st.sidebar:
-    st.header("🧠 Personality")
-    selected_persona_name = st.selectbox("Style", list(PERSONAS.keys()), index=0)
+    st.header("🧠 Settings")
+    selected_persona_name = st.selectbox("Persona", list(PERSONAS.keys()), index=0)
     current_system_prompt = PERSONAS[selected_persona_name]
     
     st.markdown("---")
@@ -104,20 +99,24 @@ if st.session_state.retriever is None and pdfs:
     with st.spinner("Loading..."):
         st.session_state.retriever = _rv.get_retriever(pdfs)
 
-# --- UI Layout (Standard Columns) ---
+# --- Clean Layout ---
+# Left: Image Upload (Compact)
+# Right: Chat History (Clean, no headers)
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("📸 Image Upload")
-    # SAFE UPLOADER: No CSS hiding applied to this area
-    uploaded_image = st.file_uploader("Upload Medical Photo", type=["jpg", "png", "jpeg"])
+    # Minimalist Uploader - Removed big "Image Upload" header
+    uploaded_image = st.file_uploader("Upload Image (Optional)", type=["jpg", "png", "jpeg"])
     if uploaded_image:
-        st.image(uploaded_image, caption="Analysis Context", use_column_width=True)
+        st.image(uploaded_image, caption="Uploaded", use_column_width=True)
 
 with col2:
-    st.subheader("💬 Chat")
+    # Minimalist Chat Area - Removed "Chat History" header
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    
+    if len(st.session_state.messages) == 0:
+        st.caption("Start a conversation about your health or uploaded documents below.")
 
 # --- Chat Input (Bottom) ---
 if prompt := st.chat_input("Ask a medical question..."):
