@@ -4,126 +4,72 @@ import openai
 import base64
 from dotenv import load_dotenv
 import rag_vision as _rv
-from datetime import datetime
 
-# Load environment variables
 load_dotenv()
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="AI Care Vision", 
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
+# 1. 强制收起侧边栏，页面设为英文
+st.set_page_config(page_title="AI Care Vision", layout="wide", initial_sidebar_state="collapsed")
 
-# --- Session State Initialization ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "retriever" not in st.session_state:
-    st.session_state.retriever = None
+if "messages" not in st.session_state: st.session_state.messages = []
+if "retriever" not in st.session_state: st.session_state.retriever = None
 
-# --- Helper: Image Encoding ---
 def encode_image(image_file):
-    """Encode an uploaded image to base64."""
     return base64.b64encode(image_file.read()).decode('utf-8')
 
-# --- Header ---
 st.title("👁️ AI Care Vision Assistant")
-st.caption("A multi-modal platform that can see your medical documents and analyze them based on internal knowledge.")
 
-# --- Sidebar: Configuration & Image Upload ---
-with st.sidebar:
-    st.header("1. Document Analysis")
-    uploaded_image = st.file_uploader("Upload Medical Image (Prescription, Report, etc.)", type=["jpg", "png", "jpeg"])
-    
-    if uploaded_image:
-        st.image(uploaded_image, caption="Uploaded Document", use_column_width=True)
+# 2. 将上传区域移至主页，确保一眼就能看到
+st.subheader("1. Upload Medical Document")
+uploaded_image = st.file_uploader("Upload a photo of a prescription or report", type=["jpg", "png", "jpeg"])
+if uploaded_image:
+    st.image(uploaded_image, caption="Analysis Subject", width=300)
 
-    st.markdown("---")
-    st.header("2. Knowledge Base Status")
-    pdfs = _rv.get_backend_pdfs()
-    if pdfs:
-        st.success(f"Ready: {len(pdfs)} PDFs in backend.")
-        if st.button("Initialize Knowledge Index"):
-            with st.spinner("Indexing..."):
-                st.session_state.retriever = _rv.get_retriever()
-                st.success("Indexing Complete!")
-    else:
-        st.warning("Please upload PDFs to the 'data/' folder.")
+st.markdown("---")
+st.subheader("2. Chat with Expert")
 
-    st.markdown("---")
-    st.header("3. Model Settings")
-    # Using OpenRouter as the provider
-    model_name = st.selectbox("Select Vision Model", ["openai/gpt-4o-mini", "google/gemini-flash-1.5", "anthropic/claude-3-haiku"])
-    st.info("Ensure your OpenRouter API Key is set in the environment or secrets.")
-
-# --- Chat Interface ---
-# Scrollable messaging area
+# 打印历史记录
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-# Chat Input
-if prompt := st.chat_input("Explain this document or ask about medical guidelines..."):
-    # Add user message to history
+# 侧边栏仅作为后台设置
+with st.sidebar:
+    st.header("Settings")
+    model_name = st.selectbox("Model", ["openai/gpt-4o-mini", "google/gemini-pro-1.5"])
+    if st.button("Reload Knowledge Base"):
+        st.session_state.retriever = _rv.get_retriever()
+        st.success("Indexing Done")
+
+# 输入框逻辑
+if prompt := st.chat_input("Ask about the image or medical guidelines..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Analyzing..."):
-            # 1. Context Retrieval (Text-based)
             context = ""
             if st.session_state.retriever:
-                try:
-                    docs = st.session_state.retriever.get_relevant_documents(prompt)
-                    context = "\n".join([d.page_content for d in docs])
-                except Exception as e:
-                    st.warning(f"RAG Error: {e}")
-
-            # 2. Construct Multi-modal Payload
-            system_prompt = "You are a professional medical assistant. Analyze the user's input. "
-            if context:
-                system_prompt += f"Consider the following internal guidelines:\n{context}"
+                docs = st.session_state.retriever.get_relevant_documents(prompt)
+                context = "\n".join([d.page_content for d in docs])
             
-            # Message structure for OpenRouter/OpenAI Vision
-            content_list = [{"type": "text", "text": prompt}]
+            # 构造多模态消息负载
+            content_payload = [{"type": "text", "text": prompt}]
             if uploaded_image:
-                base64_image = encode_image(uploaded_image)
-                content_list.append({
+                content_payload.append({
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                    "image_url": {"url": f"data:image/jpeg;base64,{encode_image(uploaded_image)}"}
                 })
 
-            # Prepare API Message (with memory)
-            # We only send text memory for simplicity, but the current turn contains the image
-            api_messages = [{"role": "system", "content": system_prompt}]
-            # Memory - text only for previous rounds
-            for m in st.session_state.messages[-6:-1]:
-                api_messages.append({"role": m["role"], "content": m["content"]})
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1"))
             
-            # Current turn - multi-modal
-            api_messages.append({"role": "user", "content": content_list})
-
-            # 3. Call API via OpenRouter
-            try:
-                client = openai.OpenAI(
-                    api_key=os.getenv("OPENAI_API_KEY"),
-                    base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
-                )
-                
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=api_messages,
-                    headers={
-                        "HTTP-Referer": "https://ai-care-platform.streamlit.app", # Replace with your site URL
-                        "X-Title": "AI Care Vision", # Optional name
-                    }
-                )
-                
-                answer = response.choices[0].message.content
-                st.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-                
-            except Exception as e:
-                st.error(f"Vision API Error: {e}")
+            # 使用正确的 extra_headers 修复报错
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": f"You are a medical assistant. Guidelines:\n{context}"},
+                    {"role": "user", "content": content_payload}
+                ],
+                extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"}
+            )
+            answer = response.choices[0].message.content
+            st.markdown(answer)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
