@@ -18,40 +18,68 @@ except ImportError:
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-# Use absolute path relative to this script for data folder
+# Absolute path detection for Streamlit Cloud
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_KB_DIR = os.path.join(CURRENT_DIR, "data")
 
 def get_backend_pdfs() -> List[str]:
-    """Scan the local data folder for PDF files."""
+    """Scan the data folder for PDF files and return their paths."""
     if not os.path.exists(BACKEND_KB_DIR):
         os.makedirs(BACKEND_KB_DIR, exist_ok=True)
-    return glob.glob(os.path.join(BACKEND_KB_DIR, "*.pdf"))
+    # Get all .pdf files
+    pdf_files = glob.glob(os.path.join(BACKEND_KB_DIR, "*.pdf"))
+    return sorted(pdf_files)
 
-@st.cache_data(show_spinner="Extracting Medical Knowledge...")
+@st.cache_data(show_spinner="Extracting internal medical guidelines...")
 def load_and_split_documents(file_paths: List[str]) -> List[Any]:
     all_docs = []
     if not file_paths: return []
     for fp in file_paths:
         try:
             loader = PyPDFLoader(fp)
-            all_docs.extend(loader.load())
+            pages = loader.load()
+            for p in pages:
+                p.metadata["source"] = os.path.basename(fp)
+            all_docs.extend(pages)
         except Exception:
             try:
                 import pypdf
                 reader = pypdf.PdfReader(fp)
                 for i, page in enumerate(reader.pages):
-                    all_docs.append(Document(page_content=page.extract_text(), metadata={"source": os.path.basename(fp), "page": i+1}))
+                    text = page.extract_text()
+                    if text:
+                        all_docs.append(Document(
+                            page_content=text, 
+                            metadata={"source": os.path.basename(fp), "page": i+1}
+                        ))
             except Exception as e:
-                st.error(f"Failed to read {os.path.basename(fp)}: {e}")
+                st.error(f"Error reading {os.path.basename(fp)}: {e}")
+    
     if not all_docs: return []
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     return splitter.split_documents(all_docs)
 
-@st.cache_resource(show_spinner="Building Expert Index...")
+@st.cache_resource(show_spinner="Integrating Expert Knowledge Index...")
 def get_vector_store_and_retriever(_splits: List[Any]):
+    # Check if we are in Dev Mode (Mock)
+    is_dev = os.getenv("RAG_USE_RANDOM_EMBEDDINGS") == "1"
+    
+    if is_dev:
+        class MockRetriever:
+            def __init__(self, docs): self.docs = docs
+            def get_relevant_documents(self, query): return self.docs[:5]
+        return MockRetriever(_splits)
+
     api_key = os.getenv("OPENAI_API_KEY")
     base_url = os.getenv("OPENAI_API_BASE", OPENROUTER_BASE)
+    
+    if not api_key:
+        st.warning("No API Key found. Using Dev Mode instead.")
+        class MockRetriever:
+            def __init__(self, docs): self.docs = docs
+            def get_relevant_documents(self, query): return self.docs[:5]
+        return MockRetriever(_splits)
+
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small", 
         openai_api_key=api_key,
@@ -59,9 +87,10 @@ def get_vector_store_and_retriever(_splits: List[Any]):
     )
     try:
         db = FAISS.from_documents(_splits, embeddings)
-        return db.as_retriever(search_kwargs={"k": 4}) # Increase K for more context
+        # Search for 5 chunks for richer context
+        return db.as_retriever(search_kwargs={"k": 5})
     except Exception as e:
-        st.error(f"Vector Store Error: {e}")
+        st.error(f"Vector Database Error: {e}")
         return None
 
 def get_retriever(file_paths: List[str] = None):
