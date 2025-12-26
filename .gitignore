@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.streamlit/
+logs/
+uploaded_kbs/
+ai_care_env_final/
+data/
