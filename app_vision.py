@@ -13,75 +13,64 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- THEME: WARM CARE (CSS Injection) ---
+# --- THEME: WARM CARE (Safe CSS Version) ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* 1. Global Font & Colors */
+        /* 1. Global Font */
         @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600&display=swap');
         
-        html, body, [class*="css"] {
-            font-family: 'Nunito', sans-serif;
-        }
-        
-        /* Main Background */
-        .stApp {
-            background-color: #FDFCF8; /* Creamy White */
+        html, body, .stApp {
+            font-family: 'Nunito', sans-serif !important;
+            background-color: #FDFCF8 !important; /* Creamy White */
         }
         
         /* Sidebar Background */
         [data-testid="stSidebar"] {
-            background-color: #F6F3E6; /* Warm Beige */
+            background-color: #F6F3E6 !important; /* Warm Beige */
             border-right: 1px solid #EADDCD;
         }
 
         /* 2. Chat Bubbles */
-        /* Assistant Bubble */
+        /* User Bubble (Right) */
+        .stChatMessage[data-testid="stChatMessage"]:nth-child(even) {
+             background-color: #FFF0E3; /* Soft Peach */
+             border: 1px solid #FFE0C2;
+             border-radius: 12px;
+        }
+        
+        /* Assistant Bubble (Left) - Use generic selector to be safe */
         .stChatMessage[data-testid="stChatMessage"]:nth-child(odd) {
              background-color: #FFFFFF;
              border: 1px solid #EFEBE0;
              border-radius: 12px;
-             box-shadow: 2px 2px 8px rgba(93, 64, 55, 0.05);
-        }
-        
-        /* User Bubble */
-        .stChatMessage[data-testid="stChatMessage"]:nth-child(even) {
-             background-color: #FFF0E3; /* Soft Peach */
-             border-radius: 12px;
-             border: 1px solid #FFE0C2;
         }
         
         /* 3. Headers & Accents */
-        h1, h2, h3 {
+        h1, h2, h3, .stSubheader {
             color: #5D4037 !important; /* Warm Brown */
-            font-weight: 600;
+            font-weight: 600 !important;
         }
         
         /* Buttons */
-        div.stButton > button {
-            background-color: #FFB74D; /* Warm Orange */
-            color: white;
-            border-radius: 20px;
-            border: none;
-            padding: 10px 24px;
-            font-weight: 600;
-        }
-        div.stButton > button:hover {
-            background-color: #FFA726;
-            color: white;
-            border: none;
+        .stButton button {
+            background-color: #FFB74D !important; /* Warm Orange */
+            color: white !important;
+            border-radius: 20px !important;
+            border: none !important;
         }
         
-        /* Input Box */
-        .stChatInput {
-            border-radius: 20px;
-            border: 1px solid #E0E0E0;
+        /* 4. Input Box Styling (Ensure Visibility) */
+        .stChatInputContainer {
+            padding-bottom: 20px;
+        }
+        .stChatInput textarea {
+            background-color: #FFFFFF !important;
+            color: #333333 !important;
+            border: 1px solid #E0E0E0 !important;
         }
 
-        /* Hide Streamlit Branding */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
+        /* REMOVED AGGRESSIVE HIDING RULES TO FIX UI BUGS */
         </style>
     """, unsafe_allow_html=True)
 
@@ -100,7 +89,7 @@ PERSONAS = {
         "3. If the archive lacks info, use general medical knowledge but add a disclaimer."
     ),
     "💕 Empathetic Caregiver": (
-        "You are a warm, compassionate healthcare companion. rules:\n"
+        "You are a warm, compassionate healthcare companion. Rules:\n"
         "1. Use simple, reassuring language suitable for patients or elderly users.\n"
         "2. Avoid complex jargon. Explain medical terms simply.\n"
         "3. Focus on comfort and actionable care advice based on the archive."
@@ -120,7 +109,7 @@ PERSONAS = {
 }
 
 st.title("🧡 AI Care Assistant")
-st.caption("Your warm, personal healthcare companion with vision analysis.")
+st.caption("Your warm, personal healthcare companion.")
 
 # --- Sidebar ---
 pdfs = _rv.get_backend_pdfs()
