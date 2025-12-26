@@ -119,3 +119,82 @@ with st.sidebar:
     current_system_prompt = PERSONAS[selected_persona_name]
     
     st.markdown("---")
+    st.header("📂 Archive")
+    if pdfs:
+        st.success(f"{len(pdfs)} files active.")
+        with st.expander("Show Files"):
+            for p in pdfs: st.caption(f"- {os.path.basename(p)}")
+    else:
+        st.error("No PDFs in data/ folder")
+    
+    st.markdown("---")
+    dev_mode = st.checkbox("Dev Mode", value=False)
+    os.environ["RAG_USE_RANDOM_EMBEDDINGS"] = "1" if dev_mode else "0"
+    model_name = st.selectbox("Engine", ["openai/gpt-4o-mini", "google/gemini-pro-1.5"])
+
+if st.session_state.retriever is None and pdfs:
+    with st.spinner("Warming up knowledge base..."):
+        st.session_state.retriever = _rv.get_retriever(pdfs)
+
+# --- Layout: Columns for Upload & Chat ---
+# Use a unified layout to avoid elements getting hidden
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.info("� **Upload Image**")
+    uploaded_image = st.file_uploader("Select medical photo...", type=["jpg", "png", "jpeg"], label_visibility="collapsed")
+    if uploaded_image:
+        st.image(uploaded_image, caption="Analysis Context", use_column_width=True)
+
+with col2:
+    st.info("💬 **Consultation History**")
+    # Chat Container
+    chat_container = st.container()
+    with chat_container:
+        if not st.session_state.messages:
+            st.markdown("*No messages yet. Start the conversation below!*")
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]): st.markdown(msg["content"])
+
+# --- Logic ---
+# Chat input is naturally fixed at bottom, should be visible now CSS is fixed
+if prompt := st.chat_input("How can I help you today?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        context = ""
+        context_debug = "No context."
+        
+        if st.session_state.retriever:
+            try:
+                docs = st.session_state.retriever.get_relevant_documents(prompt)
+                if docs:
+                    context = "\n\n".join([f"[Source: {d.metadata.get('source')}] {d.page_content}" for d in docs])
+                    context_debug = "\n\n".join([f"**📄 {d.metadata.get('source')}**\n> {d.page_content[:200]}..." for d in docs])
+            except Exception: pass
+        
+        with st.expander("🔍 Debug Context"):
+            st.markdown(context_debug)
+        
+        final_prompt = current_system_prompt
+        if context:
+            final_prompt += f"\n\n### ARCHIVE DATA:\n{context}"
+        
+        payload = [{"type": "text", "text": prompt}]
+        if uploaded_image:
+            b64 = base64.b64encode(uploaded_image.read()).decode('utf-8')
+            payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+        try:
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1"))
+            res = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
+                extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"}
+            )
+            ans = res.choices[0].message.content
+            st.markdown(ans)
+            st.session_state.messages.append({"role": "assistant", "content": ans})
+        except Exception as e:
+            st.error(f"Error: {e}")
