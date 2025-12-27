@@ -193,7 +193,8 @@ if prompt := st.chat_input("Ask about your health..."):
                 res = client.chat.completions.create(
                     model=model_name,
                     messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
-                    extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"}
+                    extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"},
+                    max_tokens=2048 # Prevent 402 errors by limiting reservation
                 )
                 ans = res.choices[0].message.content
                 st.markdown(ans)
