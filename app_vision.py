@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- THEME: WARM CARE (Ultra-Safe Version) ---
+# --- THEME: WARM CARE (Polished) ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -42,23 +42,34 @@ def inject_custom_css():
              border: 1px solid #FFE0C2;
              border-radius: 10px;
         }
+
+        /* -------------------------------------------
+           UPLOADER STYLING (Miniaturized) 
+           ------------------------------------------- */
+        [data-testid="stFileUploader"] {
+            padding-top: 0px;
+            margin-top: 20px;
+        }
+        [data-testid="stFileUploader"] section {
+            padding: 10px !important;
+            background-color: #fafafa;
+            border: 1px dashed #ddd;
+        }
+        /* Hide giant icon if possible or shrink elements */
+        [data-testid="stFileUploader"] div, 
+        [data-testid="stFileUploader"] span, 
+        [data-testid="stFileUploader"] small {
+            font-size: 12px !important; /* Tiny Text */
+            line-height: 1.2 !important;
+        }
+        /* Minimize the dropzone height */
+        [data-testid="stFileUploader"] button {
+             display: none; /* Hide the Browse button to keep it clean if D&D works, or just make small */
+        }
         
         /* Headers */
         h1, h2, h3, p {
             color: #4A3B32;
-        }
-        
-        /* Button */
-        div.stButton > button {
-            background-color: #FFB74D;
-            color: white;
-            border: none;
-        }
-
-        /* Smaller Uploader Text */
-        [data-testid="stFileUploader"] label {
-            font-size: 0.8rem;
-            color: #888;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -68,6 +79,8 @@ inject_custom_css()
 # --- Session State ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "retriever" not in st.session_state: st.session_state.retriever = None
+# Uploader Key for Auto-Reset
+if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 
 # --- Helper: Image Encoding ---
 def encode_image(image_file):
@@ -81,90 +94,116 @@ PERSONAS = {
     "👴 Elderly Friendly": "Speak slowly and clearly. Use metaphors. Focus on safety."
 }
 
+# --- Title ---
 st.title("🧡 AI Care Assistant")
 
 # --- Backend Logic ---
 pdfs = _rv.get_backend_pdfs()
 with st.sidebar:
-    st.header("🧠 Settings")
-    selected_persona_name = st.selectbox("Persona", list(PERSONAS.keys()), index=0)
+    st.header("🧠 Personalization")
+    selected_persona_name = st.selectbox("Style", list(PERSONAS.keys()), index=0)
     current_system_prompt = PERSONAS[selected_persona_name]
     
     st.markdown("---")
     if pdfs:
-        st.success(f"{len(pdfs)} Archives Active")
-        with st.expander("File List"):
-            for p in pdfs: st.caption(f"- {os.path.basename(p)}")
-    else:
-        st.error("No PDFs found")
-        
+        st.success(f"{len(pdfs)} Archives Connected")
+    
+    # DEBUG CONTEXT (Moved to Sidebar to hide it)
+    # The user wanted it "small icon" or "to the side". Sidebar is perfect.
     st.markdown("---")
+    with st.expander("🔍 Debug Info"):
+        if "debug_log" in st.session_state:
+            st.markdown(st.session_state.debug_log)
+        else:
+            st.caption("No context loaded yet.")
+            
     dev_mode = st.checkbox("Dev Mode", value=False)
     os.environ["RAG_USE_RANDOM_EMBEDDINGS"] = "1" if dev_mode else "0"
     model_name = st.selectbox("Engine", ["openai/gpt-4o-mini", "google/gemini-pro-1.5"])
 
 if st.session_state.retriever is None and pdfs:
-    with st.spinner("Loading..."):
-        st.session_state.retriever = _rv.get_retriever(pdfs)
+    st.session_state.retriever = _rv.get_retriever(pdfs)
 
-# --- Chat History Loop ---
+# --- 1. Chat History (First) ---
+# This ensures messages are at the top, uploader pushes down
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        # Display Image if present in history
         if "image_data" in msg:
-            st.image(msg["image_data"], width=300)
+            st.image(msg["image_data"], width=250)
         st.markdown(msg["content"])
 
-# --- Input Area (Linear Layout) ---
-st.markdown("---")
-uploaded_image = st.file_uploader("📎 Upload photo (optional)", type=["jpg", "png", "jpeg"], label_visibility="visible")
+# --- 2. Uploader (Middle/Bottom) ---
+# Key trick: Render uploader AFTER history so it sits at the bottom of the scroll flow
+# Using a key allows us to reset it programmatically
+uploaded_image = st.file_uploader(
+    "📎 Attach Image (Single Turn Analysis)", 
+    type=["jpg", "png", "jpeg"], 
+    key=f"uploader_{st.session_state.uploader_key}"
+)
 
-if prompt := st.chat_input("Ask a medical question..."):
-    # 1. Prepare User Message Object
+# --- 3. Input (Fixed Bottom) ---
+if prompt := st.chat_input("Ask about your health..."):
+    # A. User Msg
     user_msg_obj = {"role": "user", "content": prompt}
-    
-    # 2. Handle Image
     base64_img = None
+    
+    # B. Handle Image (Only if present THIS turn)
     if uploaded_image:
-        # Save exact bytes for display history
-        user_msg_obj["image_data"] = uploaded_image.getvalue() 
+        user_msg_obj["image_data"] = uploaded_image.getvalue()
         base64_img = encode_image(uploaded_image)
-        
+    
     st.session_state.messages.append(user_msg_obj)
     
-    # Render immediately
+    # Force Rerun to display user message immediately? 
+    # Streamlit runs top-to-bottom. We need to render the new user message NOW.
     with st.chat_message("user"):
-        if uploaded_image: st.image(uploaded_image, width=300)
+        if uploaded_image: st.image(uploaded_image, width=250)
         st.markdown(prompt)
 
+    # C. AI Response
     with st.chat_message("assistant"):
-        context = ""
-        context_debug = "No context."
-        if st.session_state.retriever:
-            try:
-                docs = st.session_state.retriever.get_relevant_documents(prompt)
-                if docs:
-                    context = "\n\n".join([f"[Source: {d.metadata.get('source')}] {d.page_content}" for d in docs])
-                    context_debug = "\n\n".join([f"**📄 {d.metadata.get('source')}**\n> {d.page_content[:200]}..." for d in docs])
-            except Exception: pass
-        
-        with st.expander("🔍 Debug Context"): st.markdown(context_debug)
-        
-        final_prompt = f"{current_system_prompt}\n\n### ARCHIVE:\n{context}"
-        
-        payload = [{"type": "text", "text": prompt}]
-        if base64_img:
-            payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}})
+        with st.spinner("Thinking..."):
+            # RAG
+            context = ""
+            debug_text = "No context."
+            if st.session_state.retriever:
+                try:
+                    docs = st.session_state.retriever.get_relevant_documents(prompt)
+                    if docs:
+                        context = "\n\n".join([f"[Source: {d.metadata.get('source')}] {d.page_content}" for d in docs])
+                        debug_text = "\n\n".join([f"**📄 {d.metadata.get('source')}**\n> {d.page_content[:200]}..." for d in docs])
+                except Exception: pass
+            
+            # Save Debug Info to Session State for Sidebar
+            st.session_state.debug_log = debug_text
+            
+            # Prompt Construction
+            final_prompt = f"{current_system_prompt}\n\n### ARCHIVE:\n{context}"
+            payload = [{"type": "text", "text": prompt}]
+            
+            # Only append image if it was uploaded THIS specific time
+            if base64_img:
+                payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}})
 
-        try:
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1"))
-            res = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
-                extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"}
-            )
-            ans = res.choices[0].message.content
-            st.markdown(ans)
-            st.session_state.messages.append({"role": "assistant", "content": ans})
-        except Exception as e:
-            st.error(f"Error: {e}")
+            try:
+                client = openai.OpenAI(
+                    api_key=os.getenv("OPENAI_API_KEY"), 
+                    base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+                )
+                res = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
+                    extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"}
+                )
+                ans = res.choices[0].message.content
+                st.markdown(ans)
+                st.session_state.messages.append({"role": "assistant", "content": ans})
+                
+                # D. Auto-Clear Uploader Logic
+                # Increase key -> next render creates a fresh uploader
+                if uploaded_image:
+                    st.session_state.uploader_key += 1
+                    st.rerun() # Refresh to clear the file input visual
+                    
+            except Exception as e:
+                st.error(f"Error: {e}")
