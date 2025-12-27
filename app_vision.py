@@ -31,13 +31,12 @@ def inject_custom_css():
             background-color: #F6F3E6;
         }
         
-        /* Assistant Bubble */
+        /* Chat Bubbles */
         .stChatMessage[data-testid="stChatMessage"]:nth-child(odd) {
              background-color: #FFFFFF;
              border: 1px solid #EFEBE0;
              border-radius: 10px;
         }
-        /* User Bubble */
         .stChatMessage[data-testid="stChatMessage"]:nth-child(even) {
              background-color: #FFF0E3;
              border: 1px solid #FFE0C2;
@@ -50,10 +49,16 @@ def inject_custom_css():
         }
         
         /* Button */
-        .stButton > button {
+        div.stButton > button {
             background-color: #FFB74D;
             color: white;
             border: none;
+        }
+
+        /* Smaller Uploader Text */
+        [data-testid="stFileUploader"] label {
+            font-size: 0.8rem;
+            color: #888;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -64,6 +69,10 @@ inject_custom_css()
 if "messages" not in st.session_state: st.session_state.messages = []
 if "retriever" not in st.session_state: st.session_state.retriever = None
 
+# --- Helper: Image Encoding ---
+def encode_image(image_file):
+    return base64.b64encode(image_file.read()).decode('utf-8')
+
 # --- Personas ---
 PERSONAS = {
     "🛡️ Standard Expert": "You are an Elite Medical Assistant. Use internal archive data if possible.",
@@ -72,7 +81,6 @@ PERSONAS = {
     "👴 Elderly Friendly": "Speak slowly and clearly. Use metaphors. Focus on safety."
 }
 
-# --- Title (Minimalist) ---
 st.title("🧡 AI Care Assistant")
 
 # --- Backend Logic ---
@@ -99,29 +107,35 @@ if st.session_state.retriever is None and pdfs:
     with st.spinner("Loading..."):
         st.session_state.retriever = _rv.get_retriever(pdfs)
 
-# --- Clean Layout ---
-# Left: Image Upload (Compact)
-# Right: Chat History (Clean, no headers)
-col1, col2 = st.columns([1, 2])
+# --- Chat History Loop ---
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        # Display Image if present in history
+        if "image_data" in msg:
+            st.image(msg["image_data"], width=300)
+        st.markdown(msg["content"])
 
-with col1:
-    # Minimalist Uploader - Removed big "Image Upload" header
-    uploaded_image = st.file_uploader("Upload Image (Optional)", type=["jpg", "png", "jpeg"])
-    if uploaded_image:
-        st.image(uploaded_image, caption="Uploaded", use_column_width=True)
+# --- Input Area (Linear Layout) ---
+st.markdown("---")
+uploaded_image = st.file_uploader("📎 Upload photo (optional)", type=["jpg", "png", "jpeg"], label_visibility="visible")
 
-with col2:
-    # Minimalist Chat Area - Removed "Chat History" header
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    
-    if len(st.session_state.messages) == 0:
-        st.caption("Start a conversation about your health or uploaded documents below.")
-
-# --- Chat Input (Bottom) ---
 if prompt := st.chat_input("Ask a medical question..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    # 1. Prepare User Message Object
+    user_msg_obj = {"role": "user", "content": prompt}
+    
+    # 2. Handle Image
+    base64_img = None
+    if uploaded_image:
+        # Save exact bytes for display history
+        user_msg_obj["image_data"] = uploaded_image.getvalue() 
+        base64_img = encode_image(uploaded_image)
+        
+    st.session_state.messages.append(user_msg_obj)
+    
+    # Render immediately
+    with st.chat_message("user"):
+        if uploaded_image: st.image(uploaded_image, width=300)
+        st.markdown(prompt)
 
     with st.chat_message("assistant"):
         context = ""
@@ -139,9 +153,8 @@ if prompt := st.chat_input("Ask a medical question..."):
         final_prompt = f"{current_system_prompt}\n\n### ARCHIVE:\n{context}"
         
         payload = [{"type": "text", "text": prompt}]
-        if uploaded_image:
-            b64 = base64.b64encode(uploaded_image.read()).decode('utf-8')
-            payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        if base64_img:
+            payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}})
 
         try:
             client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1"))
