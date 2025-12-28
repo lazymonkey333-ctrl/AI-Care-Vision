@@ -43,30 +43,20 @@ def inject_custom_css():
              border-radius: 10px;
         }
 
-        /* -------------------------------------------
-           UPLOADER STYLING (Miniaturized) 
-           ------------------------------------------- */
+        /* UPLOADER STYLING (Miniaturized & Bottom) */
         [data-testid="stFileUploader"] {
-            padding-top: 0px;
-            margin-top: 20px;
+            padding-top: 5px;
+            margin-top: 10px;
         }
         [data-testid="stFileUploader"] section {
-            padding: 10px !important;
+            padding: 8px !important;
             background-color: #fafafa;
             border: 1px dashed #ddd;
         }
-        /* Hide giant icon if possible or shrink elements */
-        [data-testid="stFileUploader"] div, 
-        [data-testid="stFileUploader"] span, 
-        [data-testid="stFileUploader"] small {
-            font-size: 12px !important; /* Tiny Text */
-            line-height: 1.2 !important;
+        [data-testid="stFileUploader"] div, span, small {
+            font-size: 11px !important;
         }
-        /* Minimize the dropzone height */
-        [data-testid="stFileUploader"] button {
-             display: none; /* Hide the Browse button to keep it clean if D&D works, or just make small */
-        }
-        
+
         /* Headers */
         h1, h2, h3, p {
             color: #4A3B32;
@@ -79,98 +69,91 @@ inject_custom_css()
 # --- Session State ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "retriever" not in st.session_state: st.session_state.retriever = None
-# Uploader Key for Auto-Reset
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 
-# --- Helper: Image Encoding ---
+# --- Function: Encode Image ---
 def encode_image(image_file):
     return base64.b64encode(image_file.read()).decode('utf-8')
 
-# --- Personas ---
-PERSONAS = {
-    "🛡️ Standard Expert": "You are an Elite Medical Assistant. Use internal archive data if possible.",
-    "💕 Empathetic Caregiver": "You are a warm, compassionate healthcare companion. Use simple language.",
-    "🔬 Strict Analyst": "You are a rigorous data analyst. Be concise and data-driven.",
-    "👴 Elderly Friendly": "Speak slowly and clearly. Use metaphors. Focus on safety."
-}
-
-# --- Title ---
 st.title("🧡 AI Care Assistant")
 
 # --- Backend Logic ---
 pdfs = _rv.get_backend_pdfs()
+
 with st.sidebar:
-    st.header("🧠 Personalization")
-    selected_persona_name = st.selectbox("Style", list(PERSONAS.keys()), index=0)
-    current_system_prompt = PERSONAS[selected_persona_name]
+    st.header("🧠 Settings")
+    
+    # 1. Model Selection (With Free Tier)
+    model_name = st.selectbox("Engine", [
+        "google/gemini-2.0-flash-exp:free", # Free
+        "meta-llama/llama-3.2-11b-vision-instruct:free", # Free
+        "openai/gpt-4o-mini", # Paid
+        "google/gemini-pro-1.5" # Paid
+    ])
+    
+    # 2. Logic to Force Dev Mode if Free Model is selected
+    # This avoids paying for embeddings if the user is broke
+    is_free_model = ":free" in model_name
     
     st.markdown("---")
+    
+    # Dev Mode checkbox - Auto-checked if free model
+    if is_free_model:
+        st.info("ℹ️ Free Tier active: 'Dev Mode' enabled to save embedding costs.")
+        dev_mode = st.checkbox("Dev Mode (Mock Embeddings)", value=True, disabled=False, help="Uses mock search to save money.")
+    else:
+        dev_mode = st.checkbox("Dev Mode (Mock Embeddings)", value=False)
+        
+    os.environ["RAG_USE_RANDOM_EMBEDDINGS"] = "1" if dev_mode else "0"
+
+    # Files
     if pdfs:
         st.success(f"{len(pdfs)} Archives Connected")
     
-    # DEBUG CONTEXT (Moved to Sidebar to hide it)
-    # The user wanted it "small icon" or "to the side". Sidebar is perfect.
+    # Debug Info
     st.markdown("---")
     with st.expander("🔍 Debug Info"):
         if "debug_log" in st.session_state:
             st.markdown(st.session_state.debug_log)
         else:
-            st.caption("No context loaded yet.")
-            
-    dev_mode = st.checkbox("Dev Mode", value=False)
-    os.environ["RAG_USE_RANDOM_EMBEDDINGS"] = "1" if dev_mode else "0"
-    
-    # FREE TIER MODELS (Vision Capable)
-    # Note: adding ':free' suffix ensures we use the free endpoint
-    model_name = st.selectbox("Engine (Free Tier)", [
-        "google/gemini-2.0-flash-exp:free",  # Best Free Vision Model
-        "meta-llama/llama-3.2-11b-vision-instruct:free", # Fast & Good
-        "google/gemini-pro-1.5-exp" # Often free or very cheap
-    ])
+            st.caption("No context.")
 
 if st.session_state.retriever is None and pdfs:
     st.session_state.retriever = _rv.get_retriever(pdfs)
 
-# --- 1. Chat History (First) ---
-# This ensures messages are at the top, uploader pushes down
+# --- Chat History ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         if "image_data" in msg:
             st.image(msg["image_data"], width=250)
         st.markdown(msg["content"])
 
-# --- 2. Uploader (Middle/Bottom) ---
-# Key trick: Render uploader AFTER history so it sits at the bottom of the scroll flow
-# Using a key allows us to reset it programmatically
+# --- Uploader (Bottom) ---
 uploaded_image = st.file_uploader(
-    "📎 Attach Image (Single Turn Analysis)", 
+    "📎 Attach Image", 
     type=["jpg", "png", "jpeg"], 
     key=f"uploader_{st.session_state.uploader_key}"
 )
 
-# --- 3. Input (Fixed Bottom) ---
-if prompt := st.chat_input("Ask about your health..."):
-    # A. User Msg
+# --- Input ---
+if prompt := st.chat_input("Message..."):
+    # User Msg
     user_msg_obj = {"role": "user", "content": prompt}
     base64_img = None
-    
-    # B. Handle Image (Only if present THIS turn)
     if uploaded_image:
         user_msg_obj["image_data"] = uploaded_image.getvalue()
         base64_img = encode_image(uploaded_image)
     
     st.session_state.messages.append(user_msg_obj)
     
-    # Force Rerun to display user message immediately? 
-    # Streamlit runs top-to-bottom. We need to render the new user message NOW.
+    # Render User
     with st.chat_message("user"):
         if uploaded_image: st.image(uploaded_image, width=250)
         st.markdown(prompt)
 
-    # C. AI Response
+    # Render AI
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # RAG
             context = ""
             debug_text = "No context."
             if st.session_state.retriever:
@@ -181,14 +164,12 @@ if prompt := st.chat_input("Ask about your health..."):
                         debug_text = "\n\n".join([f"**📄 {d.metadata.get('source')}**\n> {d.page_content[:200]}..." for d in docs])
                 except Exception: pass
             
-            # Save Debug Info to Session State for Sidebar
             st.session_state.debug_log = debug_text
             
-            # Prompt Construction
-            final_prompt = f"{current_system_prompt}\n\n### ARCHIVE:\n{context}"
-            payload = [{"type": "text", "text": prompt}]
+            system_prompt = "You are a helpful medical assistant. Use the archive context if relevant."
+            final_prompt = f"{system_prompt}\n\n### ARCHIVE:\n{context}"
             
-            # Only append image if it was uploaded THIS specific time
+            payload = [{"type": "text", "text": prompt}]
             if base64_img:
                 payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}})
 
@@ -201,17 +182,17 @@ if prompt := st.chat_input("Ask about your health..."):
                     model=model_name,
                     messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
                     extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"},
-                    max_tokens=2048 # Prevent 402 errors by limiting reservation
+                    max_tokens=1000 # CRITICAL: Strict limit to avoid 402 errors
                 )
                 ans = res.choices[0].message.content
                 st.markdown(ans)
                 st.session_state.messages.append({"role": "assistant", "content": ans})
                 
-                # D. Auto-Clear Uploader Logic
-                # Increase key -> next render creates a fresh uploader
+                # Auto-Clear Uploader
                 if uploaded_image:
                     st.session_state.uploader_key += 1
-                    st.rerun() # Refresh to clear the file input visual
+                    st.rerun()
                     
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"API Error: {e}")
+                st.caption("Tip: If you see Error 402, your specific model requires more credits. Try switching to a different ':free' model.")
