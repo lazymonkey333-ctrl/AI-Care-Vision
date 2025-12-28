@@ -83,12 +83,11 @@ pdfs = _rv.get_backend_pdfs()
 with st.sidebar:
     st.header("🧠 Settings")
     
-    # 1. Model Selection (With Free Tier)
-    model_name = st.selectbox("Engine", [
-        "google/gemini-2.0-flash-exp:free", # Free
-        "meta-llama/llama-3.2-11b-vision-instruct:free", # Free
-        "openai/gpt-4o-mini", # Paid
-        "google/gemini-pro-1.5" # Paid
+    # FREE TIER MODELS (Strictly Validated Names)
+    # Using only the most stable free models to avoid 404/402
+    model_name = st.selectbox("Engine (Free Tier)", [
+        "google/gemini-2.0-flash-exp:free",  # Primary Free Option
+        "meta-llama/llama-3.2-11b-vision-instruct:free", # Backup
     ])
     
     # 2. Logic to Force Dev Mode if Free Model is selected
