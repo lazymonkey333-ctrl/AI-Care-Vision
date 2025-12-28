@@ -119,7 +119,14 @@ with st.sidebar:
             
     dev_mode = st.checkbox("Dev Mode", value=False)
     os.environ["RAG_USE_RANDOM_EMBEDDINGS"] = "1" if dev_mode else "0"
-    model_name = st.selectbox("Engine", ["openai/gpt-4o-mini", "google/gemini-pro-1.5"])
+    
+    # FREE TIER MODELS (Vision Capable)
+    # Note: adding ':free' suffix ensures we use the free endpoint
+    model_name = st.selectbox("Engine (Free Tier)", [
+        "google/gemini-2.0-flash-exp:free",  # Best Free Vision Model
+        "meta-llama/llama-3.2-11b-vision-instruct:free", # Fast & Good
+        "google/gemini-pro-1.5-exp" # Often free or very cheap
+    ])
 
 if st.session_state.retriever is None and pdfs:
     st.session_state.retriever = _rv.get_retriever(pdfs)
