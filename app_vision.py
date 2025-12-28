@@ -44,7 +44,7 @@ def inject_custom_css():
              border-radius: 10px;
         }
 
-        /* UPLOADER STYLING: Bottom Placement */
+        /* UPLOADER STYLING */
         [data-testid="stFileUploader"] {
             padding-bottom: 5px;
             margin-bottom: 5px;
@@ -76,23 +76,36 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 def encode_image(image_file):
     return base64.b64encode(image_file.read()).decode('utf-8')
 
+# --- PERSONAS RESTORED ---
+PERSONAS = {
+    "🛡️ Standard Expert": "You are an Elite Medical Assistant. Rules: 1. Prioritize internal archive data. 2. Be concise and professional.",
+    "💕 Empathetic Caregiver": "You are a warm, compassionate healthcare companion. Rules: 1. Use simple, reassuring language. 2. Focus on comfort and understandable advice.",
+    "🔬 Strict Analyst": "You are a rigorous data analyst. Rules: 1. Be extremely direct and concise. 2. Focus purely on data and guidelines.",
+    "👴 Elderly Friendly": "You are a patient assistant for elderly users. Rules: 1. Speak very clearly and slowly. 2. Use metaphors. 3. Remind about safety."
+}
+
 st.title("🧡 AI Care Assistant")
 
 # --- Backend Logic ---
 pdfs = _rv.get_backend_pdfs()
 
 with st.sidebar:
-    st.header("🧠 Settings")
+    st.header("🧠 Personalization")
     
-    # 1. Models (Fallback Logic Built-in)
-    st.caption("Auto-switches to backup if rate limited.")
+    # 1. Persona Selector (RESTORED)
+    selected_persona_name = st.selectbox("Assistant Style", list(PERSONAS.keys()), index=0)
+    current_system_prompt = PERSONAS[selected_persona_name]
+    
+    st.markdown("---")
+    
+    # 2. Models (Safe Logic)
+    # Using simple retry logic on the SAME stable free model instead of a broken backup
+    st.caption("Engine: Google Gemini")
     primary_model = "google/gemini-2.0-flash-exp:free"
-    backup_model = "meta-llama/llama-3.2-11b-vision-instruct:free"
     
     if pdfs:
         st.success(f"{len(pdfs)} Archives Connected")
     
-    # Debug Info
     with st.expander("🔍 Debug"):
         if "debug_log" in st.session_state:
             st.markdown(st.session_state.debug_log)
@@ -106,7 +119,7 @@ with st.sidebar:
 if st.session_state.retriever is None and pdfs:
     st.session_state.retriever = _rv.get_retriever(pdfs)
 
-# --- LAYOUT: MAIN CHAT + STATUS ---
+# --- LAYOUT ---
 chat_container = st.container()
 
 with chat_container:
@@ -123,7 +136,7 @@ uploaded_image = st.file_uploader(
     key=f"uploader_{st.session_state.uploader_key}"
 )
 
-# --- INSTANT PREVIEW (Before Send) ---
+# --- INSTANT PREVIEW ---
 if uploaded_image:
     st.image(uploaded_image, caption="Ready to send...", width=150)
 
@@ -144,11 +157,11 @@ if prompt := st.chat_input("Message..."):
         if uploaded_image: st.image(uploaded_image, width=250)
         st.markdown(prompt)
 
-    # 2. AI Logic (With Fallback)
+    # 2. AI Logic (Retry Strategy)
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         
-        # RAG Context
+        # RAG
         context = ""
         debug_text = "No context."
         if st.session_state.retriever:
@@ -161,15 +174,13 @@ if prompt := st.chat_input("Message..."):
         
         st.session_state.debug_log = debug_text
         
-        # Prompt
-        system_prompt = "You are a helpful medical assistant. Use the archive context if relevant."
-        final_prompt = f"{system_prompt}\n\n### ARCHIVE:\n{context}"
+        final_prompt = f"{current_system_prompt}\n\n### ARCHIVE:\n{context}"
         
         payload = [{"type": "text", "text": prompt}]
         if base64_img:
             payload.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}})
 
-        # API CALL WITH RETRY
+        # API CALL
         client = openai.OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"), 
             base_url=os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
@@ -184,26 +195,26 @@ if prompt := st.chat_input("Message..."):
                 max_tokens=1000
             )
             ans = res.choices[0].message.content
+            
         except Exception as e:
-            # FALLBACK
+            # RETRY SAME MODEL (Because Llama was 404 broken)
             try:
-                message_placeholder.markdown("⚠️ Gemini Busy (429). Switching to Llama...")
-                time.sleep(1) # Brief pause
+                message_placeholder.markdown("⚠️ Server Busy (429). Retrying in 2s...")
+                time.sleep(2) 
                 res = client.chat.completions.create(
-                    model=backup_model,
+                    model=primary_model, 
                     messages=[{"role": "system", "content": final_prompt}, {"role": "user", "content": payload}],
                     extra_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "AI Care Vision"},
                     max_tokens=1000
                 )
-                ans = f"[Backup Model] {res.choices[0].message.content}"
+                ans = res.choices[0].message.content
             except Exception as e2:
-                ans = f"❌ Service Unavailable. Please try again later. Error: {e2}"
+                ans = f"❌ System Overloaded. Please wait 10 seconds and try again. (Details: {e2})"
 
     message_placeholder.markdown(ans)
     st.session_state.messages.append({"role": "assistant", "content": ans})
     
-    # 3. CLEANUP (Guaranteed)
-    # If successful response, clear uploader
+    # 3. CLEANUP
     if uploaded_image:
         st.session_state.uploader_key += 1
         st.rerun()
